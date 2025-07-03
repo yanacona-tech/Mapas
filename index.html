@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="initial-scale=1,user-scalable=no,maximum-scale=1,width=device-width">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <link rel="stylesheet" href="css/leaflet.css">
+        <link rel="stylesheet" href="css/L.Control.Layers.Tree.css">
+        <link rel="stylesheet" href="css/L.Control.Locate.min.css">
+        <link rel="stylesheet" href="css/qgis2web.css">
+        <link rel="stylesheet" href="css/fontawesome-all.min.css">
+        <link rel="stylesheet" href="css/leaflet-control-geocoder.Geocoder.css">
+        <link rel="stylesheet" href="css/leaflet-measure.css">
+        <style>
+        html, body, #map {
+            width: 100%;
+            height: 100%;
+            padding: 0;
+            margin: 0;
+        }
+        </style>
+        <title>Mapa morfometría cuencas</title>
+    </head>
+    <body>
+        <div id="map">
+        </div>
+        <script src="js/qgis2web_expressions.js"></script>
+        <script src="js/leaflet.js"></script>
+        <script src="js/L.Control.Layers.Tree.min.js"></script>
+        <script src="js/L.Control.Locate.min.js"></script>
+        <script src="js/leaflet.rotatedMarker.js"></script>
+        <script src="js/leaflet.pattern.js"></script>
+        <script src="js/leaflet-hash.js"></script>
+        <script src="js/Autolinker.min.js"></script>
+        <script src="js/rbush.min.js"></script>
+        <script src="js/labelgun.min.js"></script>
+        <script src="js/labels.js"></script>
+        <script src="js/leaflet-control-geocoder.Geocoder.js"></script>
+        <script src="js/leaflet-measure.js"></script>
+        <script src="js/proj4.js"></script>
+        <script src="js/proj4leaflet.js"></script>
+        <script src="data/Cuencasbasins_1000_srtm_1.js"></script>
+        <script src="data/Cauceslongest_flowpath_1000_srtm_2.js"></script>
+        <script>
+        var highlightLayer;
+        function highlightFeature(e) {
+            highlightLayer = e.target;
+
+            if (e.target.feature.geometry.type === 'LineString' || e.target.feature.geometry.type === 'MultiLineString') {
+              highlightLayer.setStyle({
+                color: '#4ff034',
+              });
+            } else {
+              highlightLayer.setStyle({
+                fillColor: '#4ff034',
+                fillOpacity: 1
+              });
+            }
+            highlightLayer.openPopup();
+        }
+        var crs = new L.Proj.CRS('EPSG:32719', '+proj=utm +zone=19 +south +datum=WGS84 +units=m +no_defs', {
+            resolutions: [2800, 1400, 700, 350, 175, 84, 42, 21, 11.2, 5.6, 2.8, 1.4, 0.7, 0.35, 0.14, 0.07],
+        });
+        var map = L.map('map', {
+            crs: crs,
+            continuousWorld: false,
+            worldCopyJump: false, 
+            zoomControl:false, maxZoom:28, minZoom:1
+        }).fitBounds([[-29.990903300011762,-70.54905282332646],[-29.837438346271718,-70.32073729642612]]);
+        var hash = new L.Hash(map);
+        map.attributionControl.setPrefix('<a href="https://github.com/tomchadwin/qgis2web" target="_blank">qgis2web</a> &middot; <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a> &middot; <a href="https://qgis.org">QGIS</a>');
+        var autolinker = new Autolinker({truncate: {length: 30, location: 'smart'}});
+        // remove popup's row if "visible-with-data"
+        function removeEmptyRowsFromPopupContent(content, feature) {
+         var tempDiv = document.createElement('div');
+         tempDiv.innerHTML = content;
+         var rows = tempDiv.querySelectorAll('tr');
+         for (var i = 0; i < rows.length; i++) {
+             var td = rows[i].querySelector('td.visible-with-data');
+             var key = td ? td.id : '';
+             if (td && td.classList.contains('visible-with-data') && feature.properties[key] == null) {
+                 rows[i].parentNode.removeChild(rows[i]);
+             }
+         }
+         return tempDiv.innerHTML;
+        }
+        // add class to format popup if it contains media
+		function addClassToPopupIfMedia(content, popup) {
+			var tempDiv = document.createElement('div');
+			tempDiv.innerHTML = content;
+			if (tempDiv.querySelector('td img')) {
+				popup._contentNode.classList.add('media');
+					// Delay to force the redraw
+					setTimeout(function() {
+						popup.update();
+					}, 10);
+			} else {
+				popup._contentNode.classList.remove('media');
+			}
+		}
+        var title = new L.Control({'position':'bottomleft'});
+        title.onAdd = function (map) {
+            this._div = L.DomUtil.create('div', 'info');
+            this.update();
+            return this._div;
+        };
+        title.update = function () {
+            this._div.innerHTML = '<h2>Mapa morfometría cuencas</h2>';
+        };
+        title.addTo(map);
+        var zoomControl = L.control.zoom({
+            position: 'topleft'
+        }).addTo(map);
+        L.control.locate({locateOptions: {maxZoom: 19}}).addTo(map);
+        var measureControl = new L.Control.Measure({
+            position: 'topleft',
+            primaryLengthUnit: 'meters',
+            secondaryLengthUnit: 'kilometers',
+            primaryAreaUnit: 'sqmeters',
+            secondaryAreaUnit: 'hectares'
+        });
+        measureControl.addTo(map);
+        document.getElementsByClassName('leaflet-control-measure-toggle')[0].innerHTML = '';
+        document.getElementsByClassName('leaflet-control-measure-toggle')[0].className += ' fas fa-ruler';
+        var bounds_group = new L.featureGroup([]);
+        function setBounds() {
+        }
+        map.createPane('pane_SRTM_30m_elipsoidal_19s_0');
+        map.getPane('pane_SRTM_30m_elipsoidal_19s_0').style.zIndex = 400;
+        var img_SRTM_30m_elipsoidal_19s_0 = 'data/SRTM_30m_elipsoidal_19s_0.png';
+        var img_bounds_SRTM_30m_elipsoidal_19s_0 = [[-30.124367150265375,-70.59689046804064],[-29.81421767676652,-70.15275848466233]];
+        var layer_SRTM_30m_elipsoidal_19s_0 = new L.imageOverlay(img_SRTM_30m_elipsoidal_19s_0,
+                                              img_bounds_SRTM_30m_elipsoidal_19s_0,
+                                              {pane: 'pane_SRTM_30m_elipsoidal_19s_0'});
+        bounds_group.addLayer(layer_SRTM_30m_elipsoidal_19s_0);
+        map.addLayer(layer_SRTM_30m_elipsoidal_19s_0);
+        function pop_Cuencasbasins_1000_srtm_1(feature, layer) {
+            layer.on({
+                mouseout: function(e) {
+                    for (var i in e.target._eventParents) {
+                        if (typeof e.target._eventParents[i].resetStyle === 'function') {
+                            e.target._eventParents[i].resetStyle(e.target);
+                        }
+                    }
+                    if (typeof layer.closePopup == 'function') {
+                        layer.closePopup();
+                    } else {
+                        layer.eachLayer(function(feature){
+                            feature.closePopup()
+                        });
+                    }
+                },
+                mouseover: highlightFeature,
+            });
+            var popupContent = '<table>\
+                    <tr>\
+                        <th scope="row">Cuenca</th>\
+                        <td>' + (feature.properties['VALUE'] !== null ? autolinker.link(String(feature.properties['VALUE']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                </table>';
+            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
+			layer.on('popupopen', function(e) {
+				addClassToPopupIfMedia(content, e.popup);
+			});
+			layer.bindPopup(content, { maxHeight: 400 });
+        }
+
+        function style_Cuencasbasins_1000_srtm_1_0(feature) {
+            switch(String(feature.properties['fid'])) {
+                case '1':
+                    return {
+                pane: 'pane_Cuencasbasins_1000_srtm_1',
+                stroke: false, 
+                fill: true,
+                fillOpacity: 1,
+                fillColor: 'rgba(216,119,179,1.0)',
+                interactive: true,
+            }
+                    break;
+                case '2':
+                    return {
+                pane: 'pane_Cuencasbasins_1000_srtm_1',
+                stroke: false, 
+                fill: true,
+                fillOpacity: 1,
+                fillColor: 'rgba(222,165,86,1.0)',
+                interactive: true,
+            }
+                    break;
+                case '3':
+                    return {
+                pane: 'pane_Cuencasbasins_1000_srtm_1',
+                stroke: false, 
+                fill: true,
+                fillOpacity: 1,
+                fillColor: 'rgba(61,209,207,1.0)',
+                interactive: true,
+            }
+                    break;
+                case '4':
+                    return {
+                pane: 'pane_Cuencasbasins_1000_srtm_1',
+                stroke: false, 
+                fill: true,
+                fillOpacity: 1,
+                fillColor: 'rgba(50,15,204,1.0)',
+                interactive: true,
+            }
+                    break;
+                default:
+                    return {
+                pane: 'pane_Cuencasbasins_1000_srtm_1',
+                stroke: false, 
+                fill: true,
+                fillOpacity: 1,
+                fillColor: 'rgba(131,213,108,1.0)',
+                interactive: true,
+            }
+                    break;
+            }
+        }
+        map.createPane('pane_Cuencasbasins_1000_srtm_1');
+        map.getPane('pane_Cuencasbasins_1000_srtm_1').style.zIndex = 401;
+        map.getPane('pane_Cuencasbasins_1000_srtm_1').style['mix-blend-mode'] = 'normal';
+        var layer_Cuencasbasins_1000_srtm_1 = new L.geoJson(json_Cuencasbasins_1000_srtm_1, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_Cuencasbasins_1000_srtm_1',
+            layerName: 'layer_Cuencasbasins_1000_srtm_1',
+            pane: 'pane_Cuencasbasins_1000_srtm_1',
+            onEachFeature: pop_Cuencasbasins_1000_srtm_1,
+            style: style_Cuencasbasins_1000_srtm_1_0,
+        });
+        bounds_group.addLayer(layer_Cuencasbasins_1000_srtm_1);
+        map.addLayer(layer_Cuencasbasins_1000_srtm_1);
+        function pop_Cauceslongest_flowpath_1000_srtm_2(feature, layer) {
+            layer.on({
+                mouseout: function(e) {
+                    for (var i in e.target._eventParents) {
+                        if (typeof e.target._eventParents[i].resetStyle === 'function') {
+                            e.target._eventParents[i].resetStyle(e.target);
+                        }
+                    }
+                    if (typeof layer.closePopup == 'function') {
+                        layer.closePopup();
+                    } else {
+                        layer.eachLayer(function(feature){
+                            feature.closePopup()
+                        });
+                    }
+                },
+                mouseover: highlightFeature,
+            });
+            var popupContent = '<table>\
+                    <tr>\
+                        <th scope="row">LENGTH</th>\
+                        <td class="visible-with-data" id="LENGTH">' + (feature.properties['LENGTH'] !== null ? autolinker.link(String(feature.properties['LENGTH']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <th scope="row">AVG_SLOPE</th>\
+                        <td class="visible-with-data" id="AVG_SLOPE">' + (feature.properties['AVG_SLOPE'] !== null ? autolinker.link(String(feature.properties['AVG_SLOPE']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                </table>';
+            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
+			layer.on('popupopen', function(e) {
+				addClassToPopupIfMedia(content, e.popup);
+			});
+			layer.bindPopup(content, { maxHeight: 400 });
+        }
+
+        function style_Cauceslongest_flowpath_1000_srtm_2_0() {
+            return {
+                pane: 'pane_Cauceslongest_flowpath_1000_srtm_2',
+                opacity: 1,
+                color: 'rgba(89,93,225,1.0)',
+                dashArray: '',
+                lineCap: 'square',
+                lineJoin: 'bevel',
+                weight: 1.0,
+                fillOpacity: 0,
+                interactive: true,
+            }
+        }
+        map.createPane('pane_Cauceslongest_flowpath_1000_srtm_2');
+        map.getPane('pane_Cauceslongest_flowpath_1000_srtm_2').style.zIndex = 402;
+        map.getPane('pane_Cauceslongest_flowpath_1000_srtm_2').style['mix-blend-mode'] = 'normal';
+        var layer_Cauceslongest_flowpath_1000_srtm_2 = new L.geoJson(json_Cauceslongest_flowpath_1000_srtm_2, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_Cauceslongest_flowpath_1000_srtm_2',
+            layerName: 'layer_Cauceslongest_flowpath_1000_srtm_2',
+            pane: 'pane_Cauceslongest_flowpath_1000_srtm_2',
+            onEachFeature: pop_Cauceslongest_flowpath_1000_srtm_2,
+            style: style_Cauceslongest_flowpath_1000_srtm_2_0,
+        });
+        bounds_group.addLayer(layer_Cauceslongest_flowpath_1000_srtm_2);
+        map.addLayer(layer_Cauceslongest_flowpath_1000_srtm_2);
+        var osmGeocoder = new L.Control.Geocoder({
+            collapsed: true,
+            position: 'topleft',
+            text: 'Search',
+            title: 'Testing'
+        }).addTo(map);
+        document.getElementsByClassName('leaflet-control-geocoder-icon')[0]
+        .className += ' fa fa-search';
+        document.getElementsByClassName('leaflet-control-geocoder-icon')[0]
+        .title += 'Search for a place';
+        var overlaysTree = [
+            {label: '<img src="legend/Cauceslongest_flowpath_1000_srtm_2.png" /> Cauces — longest_flowpath_1000_srtm', layer: layer_Cauceslongest_flowpath_1000_srtm_2},
+            {label: 'Cuencas — basins_1000_srtm<br /><table><tr><td style="text-align: center;"><img src="legend/Cuencasbasins_1000_srtm_1_10.png" /></td><td>1</td></tr><tr><td style="text-align: center;"><img src="legend/Cuencasbasins_1000_srtm_1_21.png" /></td><td>2</td></tr><tr><td style="text-align: center;"><img src="legend/Cuencasbasins_1000_srtm_1_32.png" /></td><td>3</td></tr><tr><td style="text-align: center;"><img src="legend/Cuencasbasins_1000_srtm_1_43.png" /></td><td>4</td></tr><tr><td style="text-align: center;"><img src="legend/Cuencasbasins_1000_srtm_1_4.png" /></td><td></td></tr></table>', layer: layer_Cuencasbasins_1000_srtm_1},
+            {label: "SRTM_30m_elipsoidal_19s", layer: layer_SRTM_30m_elipsoidal_19s_0},]
+        var lay = L.control.layers.tree(null, overlaysTree,{
+            //namedToggle: true,
+            //selectorBack: false,
+            //closedSymbol: '&#8862; &#x1f5c0;',
+            //openedSymbol: '&#8863; &#x1f5c1;',
+            //collapseAll: 'Collapse all',
+            //expandAll: 'Expand all',
+            collapsed: true,
+        });
+        lay.addTo(map);
+        setBounds();
+        L.ImageOverlay.include({
+            getBounds: function () {
+                return this._bounds;
+            }
+        });
+        </script>
+    </body>
+</html>
